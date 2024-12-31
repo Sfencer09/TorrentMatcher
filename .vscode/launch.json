@@ -11,8 +11,12 @@
             "module": "TorrentMatcher",
             "console": "integratedTerminal",
             "args": [
+                "-t",
                 "/mnt/pool1/btmanage/Torrents",
+                "-d",
                 "/mnt/pool2/media/Movies",
+                "-d",
+                "/mnt/pool2/media/TV"
                 // "./sqlite.db",
             ]
         }
