@@ -1,5 +1,5 @@
 import os
-from typing import Dict
+from typing import Dict, List
 
 
 class DownloadedFile:
@@ -8,8 +8,8 @@ class DownloadedFile:
     # hash_cache[piece_size][offset] = pieces
     hash_cache: Dict[int, Dict[int, bytes]]
     
-    def __init__(self, path: str, hash_cache: Dict[int, Dict[int, bytes]]={}):
-        self.size = os.path.getsize(path)
+    def __init__(self, path: str, size: int, hash_cache: Dict[int, Dict[int, bytes]]={}):
+        self.size = size
         self.path = path
         self.hash_cache = hash_cache
     
@@ -24,4 +24,4 @@ class DownloadedFile:
             return None
         return self.hash_cache[piece_size][offset]
     
-    
+    # def calculate_hashes(self, piece_length: int, offsets: List[int]) -> Dict[int, bytes]:

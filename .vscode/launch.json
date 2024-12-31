@@ -11,12 +11,9 @@
             "module": "TorrentMatcher",
             "console": "integratedTerminal",
             "args": [
-                "-d",
-                "./sqlite.db",
-                "-f",
+                "./torrents",
                 "/mnt/pool2/media/Movies",
-                "-t",
-                "./torrents"
+                // "./sqlite.db",
             ]
         }
     ]

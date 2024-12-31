@@ -92,7 +92,7 @@ class TorrentFile:
     def __repr__(self) -> str:
         return f"TorrentFile(creation_date={self.creation_date}, info={repr(self.info)})"
 
-def parseTorrent(torrent:RawIOBase) -> TorrentFile:
+def parse_torrent(torrent:RawIOBase) -> TorrentFile:
     br = BufferedReader(torrent, 1024*1024)
     def isBnum(b:bytes):
         #print(b, len(b), '\n\n\n')
