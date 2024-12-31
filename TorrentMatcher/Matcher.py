@@ -61,12 +61,12 @@ def setup_database(conn: sqlite3.Connection):
     conn.commit()
     
 
-def match_files(torrent_files_path: str, file_search_path: str, *, database_path: str=':memory:') -> List[Tuple[DownloadedFile, TorrentFile]]:
-    if not os.path.exists(torrent_files_path):
+def match_files(torrent_files_paths: List[str], file_search_paths: List[str], *, database_path: str=':memory:') -> List[Tuple[DownloadedFile, TorrentFile]]:
+    if not all((os.path.exists(torrent_files_path) for torrent_files_path in torrent_files_paths)):
         raise ValueError("Torrent file path does not exist")
-    if not os.path.exists(file_search_path):
+    if not all((os.path.exists(file_search_path) for file_search_path in file_search_paths)):
         raise ValueError("Path to downloaded files does not exist")
-    if not os.path.isdir(file_search_path):
+    if not all((os.path.isdir(file_search_path) for file_search_path in file_search_paths)):
         raise ValueError("Path to downloaded files must point to a folder")
     conn = sqlite3.connect(database_path)
     setup_database(conn)
@@ -102,41 +102,41 @@ def match_files(torrent_files_path: str, file_search_path: str, *, database_path
     torrent_files: List[TorrentFile] = []
     
     # print(psutil.virtual_memory())
-    if os.path.isfile(torrent_files_path):
-        assert torrent_files_path.endswith(".torrent")
-        with open(torrent_files_path, "rb") as torrent_file_data:
-            torrent_file = parse_torrent(torrent_file_data)
-            save_torrent_file(torrent_file, torrent_files_path)
-            torrent_files.append(torrent_file)
-    else:
-        for root, _, files in os.walk(torrent_files_path):
-            for file in (os.path.join(root, file) for file in files):
-                if file.endswith(".torrent"):
-                    try:
-                        with open(file, "rb") as torrent_file_data:
-                            torrent_file = parse_torrent(torrent_file_data)
-                            save_torrent_file(torrent_file, file)
-                            torrent_files.append(torrent_file)
-                    except UnicodeDecodeError:
-                        print_exc()
-                        print(f"File path: {file}")
-                    except BEncodeParseError:
-                        print_exc()
-                        print(f"File path: {file}")
+    for torrent_files_path in torrent_files_paths:
+        if os.path.isfile(torrent_files_path):
+            assert torrent_files_path.endswith(".torrent")
+            with open(torrent_files_path, "rb") as torrent_file_data:
+                torrent_file = parse_torrent(torrent_file_data)
+                save_torrent_file(torrent_file, torrent_files_path)
+                torrent_files.append(torrent_file)
+        else:
+            for root, _, files in os.walk(torrent_files_path):
+                for file in (os.path.join(root, file) for file in files):
+                    if file.endswith(".torrent"):
+                        try:
+                            with open(file, "rb") as torrent_file_data:
+                                torrent_file = parse_torrent(torrent_file_data)
+                                save_torrent_file(torrent_file, file)
+                                torrent_files.append(torrent_file)
+                        except UnicodeDecodeError as ude:
+                            print(ude, f"File path: {file}", sep="\n    ")
+                        except BEncodeParseError as bepe:
+                            print(bepe, f"File path: {file}", sep="\n    ")
+        cur = conn.cursor()
     print(f"Max piece length= {max((tf.info.piece_length for tf in torrent_files))}")
     print(f"Min piece length= {min((tf.info.piece_length for tf in torrent_files))}")
     print(f"Number of file entries: {len(torrent_files)}")
     
-    cur = conn.cursor()
     
     # print(psutil.virtual_memory())
     # downloaded_files: List[DownloadedFile] = []
-    for root, _, files in os.walk(file_search_path):
-        for file in (os.path.join(root, file) for file in files):
-            file_size = os.path.getsize(file)
-            cur.execute("INSERT OR IGNORE INTO downloadedFile(filePath, fileSize) VALUES (?, ?)", (file, file_size))
-            # downloaded_files.append(DownloadedFile(file, file_size))
-    conn.commit()
+    for file_search_path in file_search_paths:
+        for root, _, files in os.walk(file_search_path):
+            for file in (os.path.join(root, file) for file in files):
+                file_size = os.path.getsize(file)
+                cur.execute("INSERT OR IGNORE INTO downloadedFile(filePath, fileSize) VALUES (?, ?)", (file, file_size))
+                # downloaded_files.append(DownloadedFile(file, file_size))
+        conn.commit()
     
     # TODO: fetch torrent info as well to more quickly match to full torrent path, & do it in application rather than in db
     cur.execute("SELECT downloadedFile.ROWID, downloadedFile.filePath, pieceSize, offset, hash FROM downloadedFile INNER JOIN torrentFirstHashes ON downloadedFile.fileSize = torrentFirstHashes.fileSize ORDER BY downloadedFile.filePath")
