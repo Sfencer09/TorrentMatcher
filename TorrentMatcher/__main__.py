@@ -20,4 +20,4 @@ print(args)
 #     print(repr(tor))
 #     print(tor.info.getFirstFileHashes())
 
-matched_files = match_files(args.torrentpath, args.downloadfolder, args.database)
+matched_files = match_files(args.torrentpath, args.downloadfolder, database_path=args.database)

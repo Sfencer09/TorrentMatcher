@@ -1,12 +1,14 @@
 import os
+import sys
 import sqlite3
 import hashlib
+from traceback import print_exc, print_exception
 from typing import List, Tuple
 # import psutil
 
 from .DownloadedFile import DownloadedFile
 
-from .TorrentFile import TorrentFile, parse_torrent
+from .TorrentFile import BEncodeParseError, TorrentFile, parse_torrent
 
 # TORRENT_HASH_TABLE = "torrentFirstHashes"
 # DOWNLOADED_FILE_TABLE = "downloadedFiles"
@@ -14,6 +16,14 @@ from .TorrentFile import TorrentFile, parse_torrent
 
 def setup_database(conn: sqlite3.Connection):
     cur = conn.cursor()
+    """,
+        FOREIGN KEY torrentFileRowId REFERENCES torrentFile(ROWID),
+        PRIMARY KEY torrentFileRowId,
+        PRIMARY KEY fileName"""
+    """,
+        FOREIGN KEY(fileRowId) REFERENCES downloadedFile(ROWID),
+        PRIMARY KEY fileRowId,
+        PRIMARY KEY filePath"""
     cur.executescript("""
     BEGIN;
     CREATE TABLE IF NOT EXISTS torrentFile (
@@ -27,10 +37,7 @@ def setup_database(conn: sqlite3.Connection):
         pieceSize INTEGER NOT NULL,
         fileSize INTEGER NOT NULL,
         offset INTEGER NOT NULL,
-        hash BLOB NOT NULL,
-        FOREIGN KEY torrentFileRowId REFERENCES torrentFile(ROWID),
-        PRIMARY KEY torrentFileRowId,
-        PRIMARY KEY fileName
+        hash BLOB NOT NULL
     );
     
     CREATE INDEX IF NOT EXISTS idx_torrentFirstHashes_size ON torrentFirstHashes (fileSize);
@@ -47,10 +54,7 @@ def setup_database(conn: sqlite3.Connection):
         filePath text NOT NULL,
         pieceSize INTEGER NOT NULL,
         offset INTEGER NOT NULL,
-        hash BLOB NOT NULL,
-        FOREIGN KEY(fileRowId) REFERENCES downloadedFile(ROWID),
-        PRIMARY KEY fileRowId,
-        PRIMARY KEY filePath
+        hash BLOB NOT NULL
     );
     COMMIT;
 """)
@@ -72,23 +76,25 @@ def match_files(torrent_files_path: str, file_search_path: str, *, database_path
         cur = conn.cursor()
         cur.execute("INSERT OR IGNORE INTO torrentFile(torrentPath, torrentName) VALUES(?, ?)", (file_path, torrent_file.info.name))
         conn.commit()
-        torrent_file_row_id = cur.execute("SELECT ROWID FROM torrentFile WHERE torrentPath = ?", (file_path, )).fetchone()
-        print(f"{torrent_file_row_id=}")
+        torrent_file_row_id = cur.execute("SELECT ROWID FROM torrentFile WHERE torrentPath = ?", (file_path, )).fetchone()[0]
+        # print(f"{torrent_file_row_id=}")
         first_hashes = torrent_file.info.getFirstFileHashes()
         piece_length = torrent_file.info.piece_length
         if torrent_file.info.isSingleFile:
             file_size = torrent_file.info.length
             assert len(first_hashes) == 1
-            filename = first_hashes.keys()[0]
+            filename = list(first_hashes.keys())[0]
+            # print(f"{filename=}")
+            # print(f"{first_hashes=}")
             offset, first_hash = first_hashes[filename]
             cur.execute("INSERT OR IGNORE INTO torrentFirstHashes(torrentFileRowId, fileName, pieceSize, fileSize, offset, hash) VALUES(?, ?, ?, ?, ?, ?)", 
                         (torrent_file_row_id, filename, piece_length, file_size, offset, first_hash))
-            print((torrent_file_row_id, filename, piece_length, file_size, offset, first_hash))
+            # print((torrent_file_row_id, filename, piece_length, file_size, offset, first_hash))
         else:
             for filename in first_hashes.keys():
                 offset, first_hash = first_hashes[filename]
-                file_size = filter(lambda x: os.pathsep.join(x['path']) == filename, torrent_file.info.files)[0]['length']
-                print((torrent_file_row_id, filename, piece_length, file_size, offset, first_hash))
+                file_size = [file for file in torrent_file.info.files if os.pathsep.join(file['path']) == filename][0]['length']
+                # print((torrent_file_row_id, filename, piece_length, file_size, offset, first_hash))
                 cur.execute("INSERT OR IGNORE INTO torrentFirstHashes(torrentFileRowId, fileName, pieceSize, fileSize, offset, hash) VALUES(?, ?, ?, ?, ?, ?)", 
                             (torrent_file_row_id, filename, piece_length, file_size, offset, first_hash))
         conn.commit()
@@ -98,7 +104,7 @@ def match_files(torrent_files_path: str, file_search_path: str, *, database_path
     # print(psutil.virtual_memory())
     if os.path.isfile(torrent_files_path):
         assert torrent_files_path.endswith(".torrent")
-        with open(torrent_files_path) as torrent_file_data:
+        with open(torrent_files_path, "rb") as torrent_file_data:
             torrent_file = parse_torrent(torrent_file_data)
             save_torrent_file(torrent_file, torrent_files_path)
             torrent_files.append(torrent_file)
@@ -106,22 +112,30 @@ def match_files(torrent_files_path: str, file_search_path: str, *, database_path
         for root, _, files in os.walk(torrent_files_path):
             for file in (os.path.join(root, file) for file in files):
                 if file.endswith(".torrent"):
-                    with open(file) as torrent_file_data:
-                        torrent_file = parse_torrent(torrent_file_data)
-                        save_torrent_file(torrent_file, file)
-                        torrent_files.append(torrent_file)
+                    try:
+                        with open(file, "rb") as torrent_file_data:
+                            torrent_file = parse_torrent(torrent_file_data)
+                            save_torrent_file(torrent_file, file)
+                            torrent_files.append(torrent_file)
+                    except UnicodeDecodeError:
+                        print_exc()
+                        print(f"File path: {file}")
+                    except BEncodeParseError:
+                        print_exc()
+                        print(f"File path: {file}")
     print(f"Max piece length= {max((tf.info.piece_length for tf in torrent_files))}")
     print(f"Min piece length= {min((tf.info.piece_length for tf in torrent_files))}")
+    print(f"Number of file entries: {len(torrent_files)}")
     
     cur = conn.cursor()
     
     # print(psutil.virtual_memory())
-    downloaded_files: List[DownloadedFile] = []
+    # downloaded_files: List[DownloadedFile] = []
     for root, _, files in os.walk(file_search_path):
         for file in (os.path.join(root, file) for file in files):
             file_size = os.path.getsize(file)
             cur.execute("INSERT OR IGNORE INTO downloadedFile(filePath, fileSize) VALUES (?, ?)", (file, file_size))
-            downloaded_files.append(DownloadedFile(file, file_size))
+            # downloaded_files.append(DownloadedFile(file, file_size))
     conn.commit()
     
     # TODO: fetch torrent info as well to more quickly match to full torrent path, & do it in application rather than in db
@@ -129,6 +143,7 @@ def match_files(torrent_files_path: str, file_search_path: str, *, database_path
     
     queued_file = None
     queued_file_rowId = None
+    # queued_df = None
     queued_records: List[Tuple[int, int, bytes]] = None
     
     def processQueue():
@@ -152,9 +167,11 @@ def match_files(torrent_files_path: str, file_search_path: str, *, database_path
                 processQueue()
                 # conn.commit()
             queued_file = filePath
+            # queued_df: DownloadedFile = filter(lambda x: x.path == filePath, downloaded_files)[0]
             queued_file_rowId = ROWID
             queued_records = []
         queued_records.append((piece_size, offset, found_hash))
+        # queued_df.add_hash(piece_size, offset, found_hash)
     processQueue()
     conn.commit()
     
@@ -172,3 +189,4 @@ def match_files(torrent_files_path: str, file_search_path: str, *, database_path
         print(f"File on disk: {downloadedPath}")
         print(f"Torrent file: {torrentFilePath}")
         print(f"Path within torrent: {torrentSubPath}")
+        print()
