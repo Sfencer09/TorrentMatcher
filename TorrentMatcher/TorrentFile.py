@@ -9,6 +9,10 @@ class BEncodeParseError(BaseException):
     def __init__(self, *args):
         super().__init__(*args)
 
+class WrongTorrentFileTypeError(BaseException):
+    def __init__(self, *args):
+        super().__init__(*args)
+
 def isPowerOf2(n: int) -> bool:
     return (n & (n-1) == 0) and n != 0
 
@@ -23,9 +27,9 @@ class InfoDict:
     def __init__(self, name: str, piece_length: int, pieces: bytes, *, length: int=None, files: List[Dict[str, int|List[str]]]=None):
         if len(name) == 0:
             raise ValueError("Name cannot be empty")
-        if not isPowerOf2(piece_length):
-            # raise ValueError("Piece length must be a power of two")
-            print(f'Encountered unusual piece length: {piece_length} is not a power of two! found in torrent "{name}"')
+        # if not isPowerOf2(piece_length):
+        #     # raise ValueError("Piece length must be a power of two")
+        #     print(f'Encountered unusual piece length: {piece_length} is not a power of two! found in torrent "{name}"')
         # print(len(pieces))
         if len(pieces) % SHA1_HASH_SIZE_BYTES != 0:
             raise ValueError("Piece array byte count not a multiple of 20 (SHA1 hash size)")
@@ -71,7 +75,7 @@ class InfoDict:
                 if offset == self.piece_length:
                     offset = 0
                 file_path_parts: List[str] = file['path']
-                file_full_path = os.pathsep.join(file_path_parts)
+                file_full_path = os.path.join(*file_path_parts)
                 # print(f"{file_full_path=} {current_position=} {next_position=} {first_pieces_index=} {next_pieces_index=} {self.piece_length=} {index_diff=} {offset=}")
                 if offset == 0 and index_diff > 0:
                     first_full_file_piece = self.pieces[first_pieces_index]
@@ -143,7 +147,11 @@ def parse_torrent(torrent:RawIOBase) -> TorrentFile:
                 values.append(d)
             elif isBnum(b):
                 s = parseString()
-                values.append(s.decode())
+                try:
+                    values.append(s.decode())
+                except UnicodeDecodeError:
+                    print(f"Unable to decode string {s} as UTF-8")
+                    values.append(s)
             else:
                 raise BEncodeParseError("Could not parse value " + str(int(b[0])) + " ('" + b.decode() + "') at position " + str(br.tell()))
             b = br.peek(1)[:1]
@@ -172,10 +180,15 @@ def parse_torrent(torrent:RawIOBase) -> TorrentFile:
             elif b2 == b'd':
                 value = parseDictionary()
             elif isBnum(b2):
-                if key == 'pieces':
+                if key in ('pieces', 'p1', 'info_hash', 'sha1', 'ed2k', 'filehash', 'pieces root'):
                     value = parseString()
                 else:
-                    value = parseString().decode()
+                    temp = parseString()
+                    try:
+                        value = temp.decode()
+                    except:
+                        print(f"Unable to decode string from value of key {key}. Value: {temp}")
+                        value = temp
             else:
                 raise BEncodeParseError("Could not parse value " + str(int(b2[0])) + " ('" + b2.decode() + "') at position " + str(br.tell()))
             values[key] = value
@@ -184,6 +197,8 @@ def parse_torrent(torrent:RawIOBase) -> TorrentFile:
         #print(values)
         return values
     parsedDict = parseDictionary()
+    if 'info' not in parsedDict.keys():
+        raise WrongTorrentFileTypeError("File was bencoded but did not contain 'info' key")
     #print(parsedDict)
     parsedInfoDict = parsedDict['info']
     #single file torrent
