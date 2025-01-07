@@ -16,8 +16,9 @@
                 "-d",
                 "/mnt/pool2/media/Movies",
                 "-d",
-                "/mnt/pool2/media/TV"
-                // "./sqlite.db",
+                "/mnt/pool2/media/TV",
+                "-j",
+                "./matches.json"
             ]
         }
     ]
