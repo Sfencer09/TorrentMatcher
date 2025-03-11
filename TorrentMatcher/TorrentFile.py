@@ -55,40 +55,116 @@ class InfoDict:
     def __repr__(self) -> str:
         return f"InfoDict(name='{self.name}', piece_length={self.piece_length}, pieces={self.pieces}, {'length='+repr(self.length) if self.length is not None else 'files='+repr(self.files)})"
     
-    def getFirstFileHashes(self) -> Dict[str, Tuple[int, bytes]]:
+    def getSingleFileHashes(self) -> Dict[str, Tuple[int, bytes]]:
         if self.length is not None:
             #single file torrent
             return {self.name: (0, self.pieces[0])}
-        else:
-            current_position = 0
-            # self.piece_length
-            file_pieces = {}
-            for file in self.files:
-                file_length = file['length']
-                if file_length < self.piece_length:
-                    continue
-                next_position = current_position + file_length
-                first_pieces_index = current_position // self.piece_length
-                next_pieces_index = next_position // self.piece_length
-                index_diff = next_pieces_index - first_pieces_index
-                offset = self.piece_length - (current_position % self.piece_length)
-                if offset == self.piece_length:
-                    offset = 0
-                file_path_parts: List[str] = file['path']
-                file_full_path = os.path.join(*file_path_parts)
-                # print(f"{file_full_path=} {current_position=} {next_position=} {first_pieces_index=} {next_pieces_index=} {self.piece_length=} {index_diff=} {offset=}")
-                if offset == 0 and index_diff > 0:
-                    first_full_file_piece = self.pieces[first_pieces_index]
-                    # print(first_pieces_index)
-                    # print(first_full_file_piece)
-                elif index_diff > 1:
-                    first_full_file_piece = self.pieces[first_pieces_index+1]
-                    # print(first_pieces_index+1)
-                    # print(first_full_file_piece)
-                current_position += file_length
-                file_pieces[file_full_path] = (offset, first_full_file_piece)
-            return file_pieces
+        current_position = 0
+        # self.piece_length
+        file_pieces = {}
+        for file in self.files:
+            file_length = file['length']
+            next_position = current_position + file_length
+            first_pieces_index = current_position // self.piece_length
+            next_pieces_index = next_position // self.piece_length
+            index_diff = next_pieces_index - first_pieces_index
+            offset = self.piece_length - (current_position % self.piece_length)
+            current_position += file_length
+            if file_length < self.piece_length:
+                continue
+            if offset == self.piece_length:
+                offset = 0
+            file_path_parts: List[str] = file['path']
+            file_full_path = os.path.join(*file_path_parts)
+            # print(f"{file_full_path=} {current_position=} {next_position=} {first_pieces_index=} {next_pieces_index=} {self.piece_length=} {index_diff=} {offset=}")
+            if offset == 0 and index_diff > 0:
+                first_full_file_piece = self.pieces[first_pieces_index]
+                # print(first_pieces_index)
+                # print(first_full_file_piece)
+            elif index_diff > 1:
+                first_full_file_piece = self.pieces[first_pieces_index+1]
+                # print(first_pieces_index+1)
+                # print(first_full_file_piece)
+            else:
+                continue
+            file_pieces[file_full_path] = (offset, first_full_file_piece)
+        return file_pieces
 
+    def getAllFileHashes(self) -> Tuple[Dict[str, Tuple[int, bytes]],
+                                    List[Tuple[int, bytes, int, List[Tuple[int, str]]]]]:
+        if self.length is not None:
+            #single file torrent
+            return ({self.name: (0, self.pieces[0])}, [])
+        current_position = 0
+        # self.piece_length
+        single_file_pieces = {}
+        multi_file_pieces = []
+        multi_file_start_piece = None
+        multi_file_first_offset = None
+        multi_file_hash = None
+        multi_files: List[Tuple[int, str]] = []
+        for file in self.files:
+            file_length = file['length']
+            next_position = current_position + file_length
+            first_pieces_index = current_position // self.piece_length
+            next_pieces_index = next_position // self.piece_length
+            index_diff = next_pieces_index - first_pieces_index
+            first_piece_offset = self.piece_length - (current_position % self.piece_length)
+            
+            next_file_offset = self.piece_length - (next_position % self.piece_length)
+            current_position += file_length
+            if first_piece_offset == self.piece_length:
+                first_piece_offset = 0
+            if next_file_offset == self.piece_length:
+                next_file_offset = 0
+            file_path_parts: List[str] = file['path']
+            file_full_path = os.path.join(*file_path_parts)
+            if multi_file_start_piece is not None:
+                multi_files.append((file_length, file_full_path))
+                if next_pieces_index != multi_file_start_piece:
+                    multi_file_pieces.append((multi_file_first_offset, multi_file_hash, multi_file_start_piece, multi_files))
+                    multi_file_start_piece = None
+                    multi_file_first_offset = None
+                    multi_file_hash = None
+                    multi_files = []
+            # print(f"{file_full_path=} {current_position=} {next_position=} {first_pieces_index=} {next_pieces_index=} {self.piece_length=} {index_diff=} {offset=}")
+            if file_length >= self.piece_length and first_piece_offset == 0 and index_diff > 0:
+                first_full_file_piece = self.pieces[first_pieces_index]
+                single_file_pieces[file_full_path] = (first_piece_offset, first_full_file_piece)
+                # print(first_pieces_index)
+                # print(first_full_file_piece)
+            elif file_length >= self.piece_length and index_diff > 1:
+                first_full_file_piece = self.pieces[first_pieces_index+1]
+                single_file_pieces[file_full_path] = (first_piece_offset, first_full_file_piece)
+                # print(first_pieces_index+1)
+                # print(first_full_file_piece)
+            #elif (file_length < self.piece_length and offset == 0) or index_diff > 0:
+            #    print(f"{file_length=} {self.piece_length=} {offset=} {index_diff=} {first_pieces_index=} {next_pieces_index=}")
+            elif multi_file_start_piece is None:
+                multi_file_start_piece = first_pieces_index
+                multi_file_first_offset = first_piece_offset
+                multi_file_hash = self.pieces[multi_file_start_piece]
+                multi_files.append((file_length, file_full_path))
+                # elif multi_file_start_piece != first_pieces_index:
+                #     ...
+            
+            if multi_file_start_piece is None and next_file_offset != 0:
+                file_length_after_offset = file_length - first_piece_offset
+                chunks_skipped = file_length_after_offset // self.piece_length
+                file_length_skipped = chunks_skipped * self.piece_length
+                file_length_consumed = file_length_skipped + first_piece_offset
+                file_length_remaining = file_length - file_length_consumed
+                assert file_length_remaining < self.piece_length
+                last_piece_offset = self.piece_length - file_length_remaining
+                assert next_file_offset + file_length_remaining == self.piece_length
+                multi_file_start_piece = first_pieces_index + chunks_skipped
+                assert multi_file_start_piece == next_pieces_index - 1
+                multi_file_first_offset = last_piece_offset
+                multi_file_hash = self.pieces[multi_file_start_piece]
+                multi_files.append((file_length, file_full_path))
+            
+        return (single_file_pieces, multi_file_pieces)
+    
 class TorrentFile:
     metadata: Dict[str, Any]
     info: InfoDict
